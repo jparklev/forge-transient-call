@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.10;
 
-import "ds-test/test.sol";
+import { DSTest } from "ds-test/test.sol";
+import { Vm } from "forge-std/Vm.sol";
+
 import { TransientCall } from "../TransientCall.sol";
 
-contract SetAndRead {
+contract MockStore {
     uint256 public value;
 
     function set(uint256 _value) public {
@@ -20,42 +22,39 @@ contract SetAndRead {
         return value;
     }
 
-    function setAndRevert(uint256 _value) public returns (uint256) {
-        value = _value;
-        revert("CALL_FAILED");
+    function revertWithMessage(string memory message) public pure {
+        require(false, message);
     }
 }
 
 contract TransientCallTest is DSTest, TransientCall {
-    SetAndRead public setAndRead;
+    Vm internal constant vm = Vm(HEVM_ADDRESS);
+
+    MockStore public mockStore;
 
     function setUp() public {
-        setAndRead = new SetAndRead();
-    }
-
-    function testFirstCallDeploys() public {
-        assertTrue(address(_transientCallInner) == address(0));
-        transientCall(address(setAndRead), abi.encodeWithSelector(SetAndRead.read.selector));
-        assertTrue(address(_transientCallInner) != address(0));
+        mockStore = new MockStore();
     }
 
     function testReadsAndRevertsChanges() public {
-        bytes memory retData = transientCall(
-            address(setAndRead),
-            abi.encodeWithSelector(SetAndRead.setAndRead.selector, 555)
+        uint256 VALUE_TO_SET = 555;
+        bytes memory retData = this.transientCall(
+            address(mockStore),
+            abi.encodeWithSelector(MockStore.setAndRead.selector, VALUE_TO_SET)
         );
-        uint256 readValue = abi.decode(retData, (uint256));
-        assertEq(readValue, 555);
 
+        uint256 readValue = abi.decode(retData, (uint256));
+
+        assertEq(readValue, VALUE_TO_SET);
         // State change was reverted
-        assertEq(setAndRead.value(), 0);
+        assertEq(mockStore.value(), 0);
     }
 
-    // function testForwardsRevertMessages() public {
-    //     vm.
-    //     bytes memory retData = transientCall(
-    //         address(setAndRead),
-    //         abi.encodeWithSelector(SetAndRead.setAndRevert.selector, 555)
-    //     );
-    // }
+    function testForwardsRevertMessages() public {
+        vm.expectRevert("CALL_FAILED");
+        this.transientCall(
+            address(mockStore),
+            abi.encodeWithSelector(MockStore.revertWithMessage.selector, "CALL_FAILED")
+        );
+    }
 }
